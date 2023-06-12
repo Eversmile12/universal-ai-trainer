@@ -1,0 +1,387 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'Mihir
+
+  Studies docs, gives you answers.
+
+  '
+Globals:
+  Function:
+    Handler: app.handler
+    Architectures:
+    - x86_64
+    Tracing: Active
+    MemorySize: 512
+    Timeout: 30
+    Environment:
+      Variables:
+        TABLE_NAME:
+          Ref: DDBMainTable
+        S3_BUCKET:
+          Ref: S3BucketName
+        JOBS_TABLE:
+          Ref: DDBJobsTable
+Parameters:
+  DDBMainTable:
+    Type: String
+    Default: DDBMainTable
+  DDBJobsTable:
+    Type: String
+    Default: DDBJobsTable
+  S3BucketName:
+    Type: String
+    Default: training-jobs-bucket
+  SQSQueueName:
+    Type: String
+    Default: training-jobs-queue
+  StateMachineName:
+    Type: String
+    Default: training-jobs-state-machine
+Resources:
+  StartWorkflowFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: StartWorkflowFunction
+      Runtime: nodejs16.x
+      MemorySize: 128
+      Events:
+        GetPagesEvent:
+          Type: Api
+          Properties:
+            Path: /start-workflow
+            Method: post
+      Policies:
+      - SQSSendMessagePolicy:
+          QueueName:
+            Ref: SQSQueueName
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: DDBMainTable
+      Environment:
+        Variables:
+          SQS_QUEUE_URL:
+            Fn::GetAtt:
+            - SQSQueue
+            - QueueUrl
+          NODE_OPTIONS: ' --enable-source-maps'
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+        - app.ts
+        Minify: true
+        Sourcemap: true
+        Target: es2020
+      SamResourceId: StartWorkflowFunction
+  GetJobStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: GetJobStatusFunction
+      Runtime: nodejs16.x
+      MemorySize: 128
+      Events:
+        GetPagesEvent:
+          Type: Api
+          Properties:
+            Path: /get-job-status
+            Method: get
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: DDBJobsTable
+      Environment:
+        Variables:
+          NODE_OPTIONS: ' --enable-source-maps'
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+        - app.ts
+        Minify: true
+        Sourcemap: true
+        Target: es2020
+      SamResourceId: GetJobStatusFunction
+  GetWebsiteSitemapFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: GetWebsiteSitemapFunction
+      Runtime: nodejs16.x
+      MemorySize: 3096
+      Timeout: 900
+      Layers:
+      - arn:aws:lambda:eu-central-1:867348956171:layer:puppeteer-aws-chrome:1
+      - arn:aws:lambda:eu-central-1:867348956171:layer:chromium-113:1
+      Policies:
+      - S3CrudPolicy:
+          BucketName:
+            Ref: S3BucketName
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: DDBJobsTable
+      Environment:
+        Variables:
+          NODE_OPTIONS: ' --enable-source-maps'
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+        - app.ts
+        External:
+        - chrome-aws-lambda
+        - '@sparticuz/chromium'
+        Minify: true
+        Sourcemap: true
+        Target: es2020
+      SamResourceId: GetWebsiteSitemapFunction
+  GetCachedPagesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: GetCachedPagesFunction
+      Runtime: nodejs16.x
+      MemorySize: 512
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: DDBMainTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: DDBJobsTable
+      Environment:
+        Variables:
+          NODE_OPTIONS: ' --enable-source-maps'
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+        - app.ts
+        Minify: true
+        Sourcemap: true
+        Target: es2020
+      SamResourceId: GetCachedPagesFunction
+  GetSitemapTextFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: GetSitemapTextFunction
+      MemorySize: 3096
+      Timeout: 900
+      Layers:
+      - arn:aws:lambda:eu-central-1:867348956171:layer:requests-2-29-0:2
+      - arn:aws:lambda:eu-central-1:770693421928:layer:Klayers-p39-beautifulsoup4:6
+      - arn:aws:lambda:eu-central-1:867348956171:layer:langchain-layer:2
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: DDBMainTable
+      Runtime: python3.9
+    Metadata:
+      SamResourceId: GetSitemapTextFunction
+  GetPageEmbeddingsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs16.x
+      MemorySize: 1024
+      Timeout: 600
+      CodeUri: GetPageEmbeddingsFunction
+      Layers:
+      - arn:aws:lambda:eu-central-1:867348956171:layer:openai-pinecone-321-015:2
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: DDBMainTable
+      - S3CrudPolicy:
+          BucketName:
+            Ref: S3BucketName
+      Environment:
+        Variables:
+          OPEN_AI: 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
+          PINECONE: c931ce31-43d2-4c59-8afc-a564390acf3e
+          NODE_OPTIONS: ' --enable-source-maps'
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+        - app.ts
+        External:
+        - openai
+        - '@pinecone-database/pinecone'
+        Minify: true
+        Sourcemap: true
+        Target: es2020
+      SamResourceId: GetPageEmbeddingsFunction
+  ConcludeJobFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ConcludeJobFunction
+      Runtime: nodejs16.x
+      MemorySize: 216
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: DDBJobsTable
+      Environment:
+        Variables:
+          NODE_OPTIONS: ' --enable-source-maps'
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+        - app.ts
+        Minify: true
+        Sourcemap: true
+        Target: es2020
+      SamResourceId: ConcludeJobFunction
+  SQSPoller:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs16.x
+      CodeUri: SQSPoller
+      Events:
+        MySQSEvent:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - SQSQueue
+              - Arn
+            BatchSize: 1
+      Policies:
+      - StepFunctionsExecutionPolicy:
+          StateMachineName:
+            Ref: StateMachineName
+      Environment:
+        Variables:
+          STEP_FUNCTION_ARN:
+            Fn::GetAtt:
+            - ProcessWebsiteKnowledgeStateMachine
+            - Arn
+          NODE_OPTIONS: ' --enable-source-maps'
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+        - app.ts
+        Minify: true
+        Sourcemap: true
+        Target: es2020
+      SamResourceId: SQSPoller
+  SQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 900
+      QueueName:
+        Ref: SQSQueueName
+  PagesDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: PK
+        AttributeType: S
+      - AttributeName: SK
+        AttributeType: S
+      - AttributeName: GSI1PK
+        AttributeType: S
+      - AttributeName: GSI1SK
+        AttributeType: S
+      KeySchema:
+      - AttributeName: PK
+        KeyType: HASH
+      - AttributeName: SK
+        KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 100
+        WriteCapacityUnits: 500
+      GlobalSecondaryIndexes:
+      - IndexName: GSI1
+        KeySchema:
+        - AttributeName: GSI1PK
+          KeyType: HASH
+        - AttributeName: GSI1SK
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+        ProvisionedThroughput:
+          ReadCapacityUnits: 10
+          WriteCapacityUnits: 10
+      TableName:
+        Ref: DDBMainTable
+  JobsDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: PK
+        AttributeType: S
+      - AttributeName: SK
+        AttributeType: S
+      KeySchema:
+      - AttributeName: PK
+        KeyType: HASH
+      - AttributeName: SK
+        KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 50
+        WriteCapacityUnits: 50
+      TableName:
+        Ref: DDBJobsTable
+  JobsStoringBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Ref: S3BucketName
+  ProcessWebsiteKnowledgeStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Type: STANDARD
+      Name:
+        Ref: StateMachineName
+      DefinitionUri: ../../statemachine/trainer.asl.json
+      DefinitionSubstitutions:
+        GetWebsiteSitemapFunctionArn:
+          Fn::GetAtt:
+          - GetWebsiteSitemapFunction
+          - Arn
+        GetCachedPagesFunctionArn:
+          Fn::GetAtt:
+          - GetCachedPagesFunction
+          - Arn
+        GetSitemapTextFunctionArn:
+          Fn::GetAtt:
+          - GetSitemapTextFunction
+          - Arn
+        GetPageEmbeddingsFunctionArn:
+          Fn::GetAtt:
+          - GetPageEmbeddingsFunction
+          - Arn
+        ConcludeJobFunctionArn:
+          Fn::GetAtt:
+          - ConcludeJobFunction
+          - Arn
+        IncludeExecutionData: true
+        Level: ALL
+      Policies:
+      - LambdaInvokePolicy:
+          FunctionName:
+            Ref: GetWebsiteSitemapFunction
+      - LambdaInvokePolicy:
+          FunctionName:
+            Ref: GetCachedPagesFunction
+      - LambdaInvokePolicy:
+          FunctionName:
+            Ref: GetSitemapTextFunction
+      - LambdaInvokePolicy:
+          FunctionName:
+            Ref: GetPageEmbeddingsFunction
+      - LambdaInvokePolicy:
+          FunctionName:
+            Ref: ConcludeJobFunction
+      - S3CrudPolicy:
+          BucketName:
+            Ref: S3BucketName
+      - SNSPublishMessagePolicy:
+          TopicName: JobsTopic
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - states:StartExecution
+          Resource: '*'
+      - CloudWatchLogsFullAccess

@@ -1,0 +1,53 @@
+{
+  "Comment": "An example of the Amazon States Language for reading messages from an SQS queue and iteratively processing each message.",
+  "StartAt": "Get Website Sitemap",
+  "States": {
+    "Get Website Sitemap": {
+      "Type": "Task",
+      "Resource": "${GetWebsiteSitemapFunctionArn}",
+      "Next": "Get Cached Pages"
+    },
+    "Get Cached Pages": {
+      "Type": "Task",
+      "Resource": "${GetCachedPagesFunctionArn}",
+      "Next": "Map Get Page Text"
+    },
+    "Map Get Page Text": {
+      "Type": "Map",
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "DISTRIBUTED",
+          "ExecutionType": "STANDARD"
+        },
+        "StartAt": "Get Sitemap Text",
+        "States": {
+          "Get Sitemap Text": {
+            "Type": "Task",
+            "Resource": "${GetSitemapTextFunctionArn}",
+            "Next": "Get Page Embeddings",
+            "ResultPath": null
+          },
+          "Get Page Embeddings": {
+            "Type": "Task",
+            "Resource": "${GetPageEmbeddingsFunctionArn}",
+            "End": true,
+            "ResultPath": null
+          }
+        }
+      },
+      "MaxConcurrency": 2000,
+      "Next": "Conclude Job",
+      "ItemBatcher": {
+        "MaxItemsPerBatch": 20
+      },
+      "ItemsPath": "$.pages",
+      "ToleratedFailurePercentage": 3,
+      "ResultPath": null
+    },
+    "Conclude Job": {
+      "Type": "Task",
+      "Resource": "${ConcludeJobFunctionArn}",
+      "End": true
+    }
+  }
+}

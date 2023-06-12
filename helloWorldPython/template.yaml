@@ -1,0 +1,445 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Mihir
+
+  Studies docs, gives you answers.
+
+Globals:
+  Function:
+    Handler: app.handler
+    Architectures: 
+      - x86_64
+    Tracing: Active
+    MemorySize: 512
+    Timeout: 30
+    Environment:
+        Variables:
+          TABLE_NAME: !Ref DDBMainTable
+          S3_BUCKET: !Ref S3BucketName
+          JOBS_TABLE: !Ref DDBJobsTable
+
+Parameters:
+  DDBMainTable:
+    Type: String
+    Default: DDBMainTable
+  DDBJobsTable:
+    Type: String
+    Default: DDBJobsTable
+  S3BucketName:
+    Type: String
+    Default: training-jobs-bucket
+  SQSQueueName:
+    Type: String
+    Default: training-jobs-queue
+  StateMachineName:
+    Type: String
+    Default: training-jobs-state-machine
+  # TopicName:
+  #   Type: String
+  #   Default: jobs-topic
+
+Resources:
+  StartWorkflowFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: src/start_workflow/
+      Runtime: nodejs16.x
+      MemorySize: 128
+      Events:
+        GetPagesEvent:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /start-workflow
+            Method: post
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !Ref SQSQueueName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DDBMainTable
+      Environment:
+        Variables:
+            SQS_QUEUE_URL: !GetAtt SQSQueue.QueueUrl
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints: 
+          - app.ts
+
+
+  GetJobStatusFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: src/get_job_status/
+      Runtime: nodejs16.x
+      MemorySize: 128
+      Events:
+        GetPagesEvent:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /get-job-status
+            Method: get
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DDBJobsTable
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints: 
+          - app.ts
+          
+  # GetFirstUrlsFunction:
+  #   Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+  #   Properties:
+  #     CodeUri: src/get_first_urls/
+  #     Runtime: nodejs16.x
+  #     MemorySize: 3096
+  #     Timeout: 900
+  #     Layers:
+  #       - "arn:aws:lambda:eu-central-1:867348956171:layer:puppeteer-aws-chrome:1"
+  #     Policies:
+  #       - S3CrudPolicy:
+  #           BucketName: !Ref S3BucketName
+
+      # Events:
+      #   GetPagesEvent:
+      #     Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+      #     Properties:
+      #       Path: /get-first-urls/{url}
+      #       Method: get
+    # Metadata: # Manage esbuild properties
+    #   BuildMethod: esbuild
+    #   BuildProperties:
+    #     Minify: true
+    #     Target: "es2020"
+    #     Sourcemap: true
+    #     EntryPoints: 
+    #       - app.ts
+    #     External:
+    #       - "chrome-aws-lambda"
+  
+  GetWebsiteSitemapFunction:
+      Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+      Properties:
+        CodeUri: src/get_website_sitemap/
+        Runtime: nodejs16.x
+        MemorySize: 3096
+        Timeout: 900
+        Layers:
+          - "arn:aws:lambda:eu-central-1:867348956171:layer:puppeteer-aws-chrome:1"
+          - "arn:aws:lambda:eu-central-1:867348956171:layer:chromium-113:1"
+        Policies:
+          - S3CrudPolicy:
+              BucketName: !Ref S3BucketName
+          - DynamoDBCrudPolicy:
+              TableName: !Ref DDBJobsTable
+      Metadata: # Manage esbuild properties
+        BuildMethod: esbuild
+        BuildProperties:
+          Minify: true
+          Target: "es2020"
+          Sourcemap: true
+          EntryPoints: 
+            - app.ts
+          External:
+            - "chrome-aws-lambda"
+            - "@sparticuz/chromium"
+
+  GetCachedPagesFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: src/get_cached_pages/
+      Runtime: nodejs16.x
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DDBMainTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DDBJobsTable
+        # - S3CrudPolicy:
+        #     BucketName: !Ref S3BucketName
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints: 
+          - app.ts
+
+  GetSitemapTextFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: src/get_sitemap_text/
+      MemorySize: 3096
+      Timeout: 900
+      Layers:
+        - "arn:aws:lambda:eu-central-1:867348956171:layer:requests-2-29-0:2"
+        - "arn:aws:lambda:eu-central-1:770693421928:layer:Klayers-p39-beautifulsoup4:6"
+        - "arn:aws:lambda:eu-central-1:867348956171:layer:langchain-layer:2"
+
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DDBMainTable
+      Runtime: python3.9
+
+  # GetSitemapTextFunctionApi:
+  #   Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+  #   Properties:
+  #     CodeUri: src/get_sitemap_text/
+  #     MemorySize: 3096
+  #     Timeout: 900
+  #     Layers:
+  #       - "arn:aws:lambda:eu-central-1:867348956171:layer:requests-2-29-0:2"
+  #       - "arn:aws:lambda:eu-central-1:770693421928:layer:Klayers-p39-beautifulsoup4:6"
+  #     Policies:
+  #       - S3CrudPolicy:
+  #           BucketName: !Ref S3BucketName
+  #       - DynamoDBCrudPolicy:
+  #           TableName: !Ref DDBMainTable
+  #     Runtime: python3.9
+  #     Events:
+  #       GetPagesEvent:
+  #         Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+  #         Properties:
+  #           Path: /get-pages-text
+  #           Method: post
+  GetPageEmbeddingsFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      Runtime: nodejs16.x
+      MemorySize: 1024
+      Timeout: 600
+      CodeUri: src/get_page_embeddings/
+      Layers:
+        - "arn:aws:lambda:eu-central-1:867348956171:layer:openai-pinecone-321-015:2"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DDBMainTable
+        - S3CrudPolicy:
+            BucketName: !Ref S3BucketName
+      Environment:
+        Variables:
+          OPEN_AI: ""
+          PINECONE: ""
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints: 
+          - app.ts
+        External:
+          - "openai"
+          - "@pinecone-database/pinecone"
+
+  ConcludeJobFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: src/conclude_job/
+      Runtime: nodejs16.x
+      MemorySize: 216
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DDBJobsTable
+        # - S3CrudPolicy:
+        #     BucketName: !Ref S3BucketName
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+          Minify: true
+          Target: "es2020"
+          Sourcemap: true
+          EntryPoints: 
+          - app.ts
+  # GetPageEmbeddingsFunctionAPI:
+  #     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+  #     Properties:
+  #       Runtime: nodejs16.x
+  #       MemorySize: 1024
+  #       Timeout: 600
+  #       CodeUri: src/get_page_embeddings/
+  #       Layers:
+  #         - "arn:aws:lambda:eu-central-1:867348956171:layer:openai-pinecone-321-015:2"
+  #       Policies:
+  #         - DynamoDBCrudPolicy:
+  #             TableName: !Ref DDBMainTable
+  #         - S3CrudPolicy:
+  #             BucketName: !Ref S3BucketName
+  #       Environment:
+  #         Variables:
+  #           OPEN_AI: "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"
+  #           PINECONE: "6dd28005-ab82-41ec-98b4-20b851b2f6a5"
+  #       Events:
+  #         GetPagesEmbeddings:
+  #           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+  #           Properties:
+  #             Path: /get-pages-embeddings
+  #             Method: post
+  #     Metadata: # Manage esbuild properties
+  #       BuildMethod: esbuild
+  #       BuildProperties:
+  #         Minify: true
+  #         Target: "es2020"
+  #         Sourcemap: true
+  #         EntryPoints: 
+  #           - app.ts
+  #         External:
+  #           - "openai"
+  #           - "@pinecone-database/pinecone"
+
+  SQSPoller:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      Runtime: nodejs16.x
+      CodeUri: src/sqs_poller/
+      # https://docs.aws.amazon.com/lambda/latest/dg/with-sqs-example.html
+      Events:
+        MySQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt SQSQueue.Arn
+            BatchSize: 1
+      Policies:
+        - StepFunctionsExecutionPolicy:
+            StateMachineName:  !Ref StateMachineName
+      Environment:
+        Variables:
+          STEP_FUNCTION_ARN: !GetAtt ProcessWebsiteKnowledgeStateMachine.Arn
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints: 
+          - app.ts
+
+  SQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 900
+      QueueName: !Ref SQSQueueName
+
+  PagesDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S # Assuming GSI1PK is a string attribute
+        - AttributeName: GSI1SK
+          AttributeType: S # Assuming GSI1PK is a string attribute
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 100
+        WriteCapacityUnits: 500
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 10
+            WriteCapacityUnits: 10
+      TableName: !Ref DDBMainTable
+
+  JobsDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 50
+        WriteCapacityUnits: 50
+      TableName: !Ref DDBJobsTable
+
+
+  JobsStoringBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+
+
+  # JobsTopic:
+  #   Type: AWS::SNS::Topic
+  #   Properties:
+  #     TopicName: !Ref TopicName
+
+
+  # JobsSNS:
+  #   Type: AWS::SNS::Subscription
+  #   Properties:
+  #     TopicArn: !GetAtt JobsTopic.Arn
+  #     Protocol: "https"
+
+  ProcessWebsiteKnowledgeStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Type: STANDARD
+      Name: !Ref StateMachineName
+      DefinitionUri: statemachine/trainer.asl.json
+      DefinitionSubstitutions:
+        GetWebsiteSitemapFunctionArn: !GetAtt GetWebsiteSitemapFunction.Arn
+        GetCachedPagesFunctionArn: !GetAtt GetCachedPagesFunction.Arn
+        GetSitemapTextFunctionArn: !GetAtt GetSitemapTextFunction.Arn
+        GetPageEmbeddingsFunctionArn: !GetAtt GetPageEmbeddingsFunction.Arn
+        ConcludeJobFunctionArn: !GetAtt ConcludeJobFunction.Arn
+      # Events:
+      #   ValidationApiEvent:
+      #     Type: Api
+      #     Properties:
+      #       Method: post
+      #       Path: /validate
+      #       RestApiId:
+      #         Ref: MyApi
+        IncludeExecutionData: true
+        Level: ALL
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref GetWebsiteSitemapFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref GetCachedPagesFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref GetSitemapTextFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref GetPageEmbeddingsFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ConcludeJobFunction
+        - S3CrudPolicy:
+            BucketName: !Ref S3BucketName
+        - SNSPublishMessagePolicy:
+            TopicName: JobsTopic
+        - Version: '2012-10-17' # Policy Document
+          Statement:
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: '*'
+        - CloudWatchLogsFullAccess
